@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OceanViz — 3D Ocean Data Explorer</title>
+  <link rel="stylesheet" href="src/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ── SIDEBAR ──────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+
+    <header class="sidebar-header">
+      <span class="logo">🌊</span>
+      <div>
+        <h1 class="sidebar-title">OceanViz</h1>
+        <div class="sidebar-subtitle">Ocean Data Explorer</div>
+      </div>
+    </header>
+
+    <!-- 1. DEPTH EXPLORATION ──────────────────────────────── -->
+    <section class="panel" id="panel-depth">
+      <h2 class="panel-title">
+        <span class="panel-title-dot"></span>
+        Depth Exploration
+      </h2>
+
+      <div class="control-row">
+        <div class="control-label">
+          <span>Depth</span>
+          <span class="value-badge" id="depth-value-display">0 m</span>
+        </div>
+        <input
+          type="range" id="depth-slider" class="slider"
+          min="0" max="2000" step="50" value="0"
+        />
+        <div class="slider-bounds">
+          <span>0 m</span><span>2000 m</span>
+        </div>
+      </div>
+
+      <!--
+        COLORBAR — gradient updated by ui.js on variable change.
+        NOTE FOR TEAMMATE (scene.js): match color stops from VARIABLE_META.
+      -->
+      <div class="colorbar-wrap">
+        <div class="colorbar-row">
+          <span class="colorbar-label" id="colorbar-min">—</span>
+          <div class="colorbar" id="colorbar"></div>
+          <span class="colorbar-label" id="colorbar-max">—</span>
+        </div>
+        <div class="colorbar-unit" id="colorbar-unit"></div>
+      </div>
+    </section>
+
+    <!-- 2. TIME ANIMATION ─────────────────────────────────── -->
+    <section class="panel" id="panel-time">
+      <h2 class="panel-title">
+        <span class="panel-title-dot"></span>
+        Time Animation
+      </h2>
+
+      <div class="control-row time-row">
+        <!--
+          INTERFACE NOTE FOR TEAMMATE (scene.js):
+          Play/pause button controls the animation interval.
+          See controls.js → startAnimation / stopAnimation.
+        -->
+        <button class="btn-play" id="btn-play-pause" aria-label="Play">
+          <span id="play-icon">▶</span>
+        </button>
+        <div class="time-info">
+          <span class="time-label" id="time-label">2024-01-01 &nbsp;·&nbsp; Step 1 / 6</span>
+          <input
+            type="range" id="time-scrubber" class="slider"
+            min="0" max="5" step="1" value="0"
+          />
+          <div class="slider-bounds">
+            <span>Jan</span><span>Jun</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. VARIABLE SELECTION ─────────────────────────────── -->
+    <section class="panel" id="panel-variable">
+      <h2 class="panel-title">
+        <span class="panel-title-dot"></span>
+        Variable Selection
+      </h2>
+
+      <div class="control-row">
+        <div class="control-label">
+          <span>Ocean variable</span>
+        </div>
+        <select id="variable-select" class="select">
+          <option value="temperature">Temperature (°C)</option>
+          <option value="salinity">Salinity (PSU)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- 4. PROFILES & PLOTS ───────────────────────────────── -->
+    <section class="panel" id="panel-profiles">
+      <h2 class="panel-title">
+        <span class="panel-title-dot"></span>
+        Profiles &amp; Plots
+      </h2>
+
+      <p class="hint-text">
+        Click an <strong>Argo float marker</strong> in the 3D scene to open
+        a depth-profile chart comparing model vs. observation data.
+      </p>
+
+      <button class="btn-secondary" id="btn-demo-profile">
+        Load demo profile
+      </button>
+    </section>
+
+  </aside><!-- /.sidebar -->
+
+
+  <!-- ── SCENE ──────────────────────────────────────────────
+       IMPORTANT FOR TEAMMATE (scene.js):
+       Mount the Three.js renderer into #scene-canvas.
+       Do NOT alter the sidebar DOM.
+  ─────────────────────────────────────────────────────────── -->
+  <main class="scene-wrapper">
+    <div id="scene-canvas"></div>
+
+    <div class="scene-placeholder" id="scene-placeholder">
+      <div class="placeholder-icon">🌊</div>
+      <div class="placeholder-label">3D Ocean Scene</div>
+      <div class="placeholder-sub">scene.js will mount here</div>
+    </div>
+
+    <!-- Bottom-right status chip -->
+    <div class="status-bar" id="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Ready</span>
+    </div>
+  </main>
+
+</div><!-- /.app-shell -->
+
+
+<!-- ── PROFILE CHART MODAL ──────────────────────────────────
+     INTERFACE NOTE FOR TEAMMATE (scene.js):
+     Dispatch a CustomEvent on window to open this modal:
+       window.dispatchEvent(new CustomEvent('argoMarkerClick', {
+         detail: argoFloatObject  // shape defined in dataShapes.js
+       }));
+─────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-overlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-labelledby="modal-title">
+
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h3 id="modal-title">Depth Profile</h3>
+        <div class="modal-subtitle" id="modal-subtitle">Model vs. Observation</div>
+      </div>
+      <button class="btn-close" id="btn-close-modal" aria-label="Close">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <canvas id="profile-chart-canvas"></canvas>
+    </div>
+
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+
+<!-- ── SCRIPTS ──────────────────────────────────────────── -->
+<script src="src/dataShapes.js"></script>
+<script src="src/ui.js"></script>
+<script src="src/controls.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "ocean-viz",
+  "version": "1.0.0",
+  "description": "3D Ocean Data Visualization Platform",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
