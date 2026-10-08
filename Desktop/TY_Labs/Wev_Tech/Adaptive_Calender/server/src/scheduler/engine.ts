@@ -107,16 +107,21 @@ export function scoreSlot(
     priorityBonus = 0.2; // LOW
   }
 
-  // Deadline urgency
+  // Deadline urgency: tasks with deadlines are placed as early as feasible to
+  // leave buffer. Slots that still have plenty of time before the deadline
+  // score higher — this pulls tight-deadline tasks toward earlier slots
+  // rather than placing them just-in-time and risking a miss.
   let deadlineUrgency: number;
   if (task.deadline === undefined) {
     deadlineUrgency = 0.5;
   } else {
     const hoursUntilDeadline =
       (task.deadline.getTime() - slotStart.getTime()) / 3_600_000;
+    // Higher when there's more time left (early slot preferred).
+    // Clamp to [0, 1]: 0 when slot is at/past deadline, 1 when 24+ h away.
     deadlineUrgency = Math.max(
       0,
-      Math.min(1, 1 - hoursUntilDeadline / 24)
+      Math.min(1, hoursUntilDeadline / 24)
     );
   }
 
@@ -288,7 +293,10 @@ export function schedule(input: SchedulerInput): SchedulerOutput {
           task.deadline !== undefined &&
           slotEnd.getTime() > task.deadline.getTime()
         ) {
-          if (!deadlineWarnedTasks.has(task.id)) {
+          // All subsequent slots will be even later, so stop scanning.
+          // Only warn if no valid slot has been found yet — if bestSlot is
+          // already set the task CAN be placed, just not in this late slot.
+          if (bestSlot === null && !deadlineWarnedTasks.has(task.id)) {
             deadlineWarnedTasks.add(task.id);
             deadlineViolationFound = true;
             warnings.push({
@@ -329,14 +337,15 @@ export function schedule(input: SchedulerInput): SchedulerOutput {
       candidateMs += fiveMin;
     }
 
-    if (bestSlot !== null && !deadlineViolationFound) {
+    if (bestSlot !== null) {
+      // A valid slot was found (possibly before the deadline boundary was hit)
       const slotStart = bestSlot;
       const slotEnd = new Date(slotStart.getTime() + taskDurationMs);
 
       const reason = `Placed at ${hhmm(slotStart)} — predicted energy ${bestEffectiveEnergy.toFixed(1)} matches required ${task.energyCost} (priority: ${task.priority})`;
 
-      // Check whether to insert a recovery break before this task
-      // Find the latest task block placed so far
+      // Check whether to insert a recovery break before this task.
+      // Find the latest task block placed so far.
       const prevTaskBlocks = placed.filter((b) => b.kind === "task");
       const prevBlock =
         prevTaskBlocks.length > 0
@@ -345,25 +354,61 @@ export function schedule(input: SchedulerInput): SchedulerOutput {
             )
           : null;
 
-      if (prevBlock !== null) {
-        const gapMs = slotStart.getTime() - prevBlock.endTime.getTime();
-        const gapMins = gapMs / 60_000;
+      // Use currentEnergy (reported now) for the break threshold, not the
+      // predicted slot energy. A user who reports energy 3 needs a recovery
+      // break before a 7-cost task regardless of what the curve predicts later.
+      if (currentEnergy < task.energyCost - 1) {
+        if (prevBlock !== null) {
+          const gapMs = slotStart.getTime() - prevBlock.endTime.getTime();
+          const gapMins = gapMs / 60_000;
 
-        if (
-          gapMins >= 5 &&
-          gapMins <= 30 &&
-          bestEffectiveEnergy < task.energyCost - 1
-        ) {
-          // Insert a recovery break in the gap
-          const breakId = `break-${_breakCounter++}`;
-          placed.push({
-            id: breakId,
-            kind: "break",
-            title: "Recovery break",
-            startTime: prevBlock.endTime,
-            endTime: slotStart,
-            reason: `Inserted recovery break before '${task.title}' — energy was ${bestEffectiveEnergy.toFixed(1)}, task needs ${task.energyCost}`,
-          });
+          if (gapMins >= 5 && gapMins <= 30) {
+            // Fill the natural gap with a recovery break
+            const breakId = `break-${_breakCounter++}`;
+            placed.push({
+              id: breakId,
+              kind: "break",
+              title: "Recovery break",
+              startTime: prevBlock.endTime,
+              endTime: slotStart,
+              reason: `Inserted recovery break before '${task.title}' — energy was ${bestEffectiveEnergy.toFixed(1)}, task needs ${task.energyCost}`,
+            });
+          } else if (gapMins > 30) {
+            // Gap is large — insert a short recovery break (15 min) immediately
+            // before this task so the user gets a prompt to recharge
+            const breakDurationMs = 15 * 60_000;
+            const breakStart = new Date(slotStart.getTime() - breakDurationMs);
+            // Only insert if the break start is after the previous block's end
+            if (breakStart.getTime() >= prevBlock.endTime.getTime()) {
+              const breakId = `break-${_breakCounter++}`;
+              placed.push({
+                id: breakId,
+                kind: "break",
+                title: "Recovery break",
+                startTime: breakStart,
+                endTime: slotStart,
+                reason: `Inserted recovery break before '${task.title}' — energy was ${bestEffectiveEnergy.toFixed(1)}, task needs ${task.energyCost}`,
+              });
+            }
+          }
+        } else {
+          // No previous task — insert a short recovery break before the very
+          // first high-cost task when current energy is too low to handle it
+          const breakDurationMs = 15 * 60_000;
+          const breakStart = new Date(slotStart.getTime() - breakDurationMs);
+          const workStartDate2 = new Date(date);
+          workStartDate2.setHours(workStart, 0, 0, 0);
+          if (breakStart.getTime() >= Math.max(workStartDate2.getTime(), currentTime.getTime())) {
+            const breakId = `break-${_breakCounter++}`;
+            placed.push({
+              id: breakId,
+              kind: "break",
+              title: "Recovery break",
+              startTime: breakStart,
+              endTime: slotStart,
+              reason: `Inserted recovery break before '${task.title}' — energy was ${bestEffectiveEnergy.toFixed(1)}, task needs ${task.energyCost}`,
+            });
+          }
         }
       }
 
@@ -376,15 +421,16 @@ export function schedule(input: SchedulerInput): SchedulerOutput {
         energyCostEstimate: task.energyCost,
         reason,
       });
-    } else if (bestSlot === null && !deadlineViolationFound) {
+    } else if (!deadlineViolationFound) {
+      // No slot found and no deadline conflict — truly unschedulable
       warnings.push({
         type: "NO_SLOT",
         taskId: task.id,
         message: `No available slot found for task "${task.title}" within working hours.`,
       });
       unscheduled.push(task);
-    } else if (deadlineViolationFound) {
-      // Deadline conflict prevents placement — already warned
+    } else {
+      // Deadline conflict and no valid slot found — already warned
       unscheduled.push(task);
     }
   }
@@ -426,7 +472,9 @@ export function reschedule(
   const newInput: SchedulerInput = {
     ...input,
     currentEnergy: remainingEnergy,
-    currentTime: new Date(),
+    // Use the caller-supplied currentTime (from input) so the function remains
+    // pure and deterministic in tests. Callers that want "right now" should
+    // update input.currentTime before calling reschedule().
     tasks: remainingTasks,
   };
 
