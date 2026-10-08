@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Note: SQLite does not support native enums.
+// Enum-typed fields are stored as TEXT. TypeScript enums are defined in src/lib/enums.ts.
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tasks          Task[]
+  fixedEvents    FixedEvent[]
+  checkins       EnergyCheckin[]
+  scheduleBlocks ScheduleBlock[]
+  taskTypeStats  TaskTypeStat[]
+  energyCurve    EnergyCurvePoint[]
+  breakStats     BreakStat[]
+  rescheduleLogs RescheduleLog[]
+}
+
+model Task {
+  id              String   @id @default(cuid())
+  userId          String
+  title           String
+  type            String
+  durationMinutes Int
+  estimatedEnergy Int
+  adjustedEnergy  Float?
+  priority        String
+  deadline        DateTime?
+  status          String   @default("PENDING")
+  date            DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduleBlocks ScheduleBlock[]
+  checkins       EnergyCheckin[]
+}
+
+model FixedEvent {
+  id         String   @id @default(cuid())
+  userId     String
+  title      String
+  startTime  DateTime
+  endTime    DateTime
+  recurrence String?
+  createdAt  DateTime @default(now())
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduleBlocks ScheduleBlock[]
+}
+
+model ScheduleBlock {
+  id           String   @id @default(cuid())
+  userId       String
+  taskId       String?
+  fixedEventId String?
+  date         DateTime
+  startTime    DateTime
+  endTime      DateTime
+  kind         String
+  status       String   @default("SCHEDULED")
+  breakType    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task       Task?       @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  fixedEvent FixedEvent? @relation(fields: [fixedEventId], references: [id], onDelete: SetNull)
+}
+
+model EnergyCheckin {
+  id             String   @id @default(cuid())
+  userId         String
+  taskId         String?
+  level          Int
+  hardnessRating Int?
+  context        String
+  timestamp      DateTime @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+}
+
+model TaskTypeStat {
+  id               String   @id @default(cuid())
+  userId           String
+  taskType         String
+  correctionFactor Float    @default(1.0)
+  sampleCount      Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, taskType])
+}
+
+model EnergyCurvePoint {
+  id          String   @id @default(cuid())
+  userId      String
+  hour        Int
+  average     Float    @default(5.0)
+  sampleCount Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, hour])
+}
+
+model BreakStat {
+  id              String   @id @default(cuid())
+  userId          String
+  breakType       String
+  durationMinutes Int
+  averageRestore  Float    @default(1.0)
+  sampleCount     Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, breakType, durationMinutes])
+}
+
+model RescheduleLog {
+  id        String   @id @default(cuid())
+  userId    String
+  blockId   String
+  oldStart  DateTime
+  newStart  DateTime
+  reason    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
