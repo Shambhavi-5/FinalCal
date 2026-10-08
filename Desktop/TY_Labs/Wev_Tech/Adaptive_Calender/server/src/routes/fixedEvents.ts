@@ -115,11 +115,12 @@ router.patch("/:id", async (req, res) => {
   const body = validate(updateFixedEventSchema, req.body, res);
   if (!body) return;
 
-  // Validate time range when both are supplied
-  if (body.startTime !== undefined && body.endTime !== undefined) {
-    const start = new Date(body.startTime);
-    const end = new Date(body.endTime);
-    if (end <= start) {
+  // Validate time range whenever either field is supplied.
+  // Fall back to the existing value so a one-field PATCH is checked too.
+  if (body.startTime !== undefined || body.endTime !== undefined) {
+    const effectiveStart = new Date(body.startTime ?? existing.startTime);
+    const effectiveEnd   = new Date(body.endTime   ?? existing.endTime);
+    if (effectiveEnd <= effectiveStart) {
       res.status(400).json({ error: "endTime must be after startTime" });
       return;
     }
