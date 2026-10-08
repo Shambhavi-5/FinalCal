@@ -5,6 +5,8 @@ import cookieParser from "cookie-parser";
 import authRouter from "./routes/auth.js";
 import tasksRouter from "./routes/tasks.js";
 import fixedEventsRouter from "./routes/fixedEvents.js";
+import checkinsRouter from "./routes/checkins.js";
+import scheduleRouter from "./routes/schedule.js";
 
 export const app = express();
 
@@ -16,6 +18,8 @@ app.use(cookieParser());
 app.use("/api/auth", authRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/fixed-events", fixedEventsRouter);
+app.use("/api/checkins", checkinsRouter);
+app.use("/api/schedule", scheduleRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", app: "EnergyCal", time: new Date().toISOString() });
