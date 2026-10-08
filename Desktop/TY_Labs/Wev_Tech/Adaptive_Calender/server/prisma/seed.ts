@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcrypt";
 import { TaskType, Priority, TaskStatus, BlockKind, BlockStatus, CheckinContext } from "../src/lib/enums.js";
 
 const prisma = new PrismaClient();
@@ -18,11 +19,12 @@ async function main() {
   await prisma.user.deleteMany();
 
   // 1. Demo user
+  const passwordHash = await bcrypt.hash("Demo1234!", 12);
   const user = await prisma.user.create({
     data: {
       email: "demo@energycal.app",
       name: "Alex Demo",
-      passwordHash: "SEED_PLACEHOLDER",
+      passwordHash,
     },
   });
   console.log(`  ✓ User created: ${user.email}`);
