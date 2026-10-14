@@ -89,17 +89,28 @@ app.post('/api/replan', async (req, res) => {
     const result = replanEngine(activities, energy, currentTimeMinutes);
     const { activities: rescheduled, insights } = result;
 
-    // Save time changes for existing DB activities (those with real _id)
-    // Include `date` in the filter to prevent cross-date or cross-user overwrites
+    // Save time changes for existing DB activities (those with real _id).
+    // Exclude skipped activities from start/end/duration updates — their start/end
+    // are sentinel values ('23:59') and must not overwrite the original scheduled times.
+    // Skipped activities have only their status updated separately.
+    // Include `date` in the filter to prevent cross-date or cross-user overwrites.
     const updatePromises = rescheduled
-      .filter(a => a._id && !String(a._id).startsWith('rest-'))
+      .filter(a => a._id && !String(a._id).startsWith('rest-') && a.status !== 'skipped')
       .map(a => Activity.findOneAndUpdate(
         { _id: a._id, date },
         { $set: { start: a.start, end: a.end, duration: a.duration, status: a.status } },
         { new: true, runValidators: true }
       ));
 
-    const savedActivities = await Promise.all(updatePromises);
+    const skippedUpdatePromises = rescheduled
+      .filter(a => a._id && !String(a._id).startsWith('rest-') && a.status === 'skipped')
+      .map(a => Activity.findOneAndUpdate(
+        { _id: a._id, date },
+        { $set: { status: 'skipped' } },
+        { new: true, runValidators: true }
+      ));
+
+    const savedActivities = await Promise.all([...updatePromises, ...skippedUpdatePromises]);
     const savedById = new Map(
       savedActivities.filter(Boolean).map(a => [a._id.toString(), a])
     );

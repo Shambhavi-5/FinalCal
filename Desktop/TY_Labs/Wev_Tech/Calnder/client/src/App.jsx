@@ -274,6 +274,7 @@ async function fetchHistory() {
   try {
     const response = await fetch(`http://localhost:5000/api/replan/history?date=${getToday()}`);
     const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Could not load history.');
     if (data.success) setHistoryRecords(data.records);
   } catch (error) {
     console.error('Could not load history:', error);
