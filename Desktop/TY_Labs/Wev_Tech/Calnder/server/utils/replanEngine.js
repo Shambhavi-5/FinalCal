@@ -11,7 +11,11 @@
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function toMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string' || !/^\d{1,2}:\d{2}$/.test(timeStr)) {
+    return NaN;
+  }
   const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return NaN;
   return h * 60 + m;
 }
 
@@ -35,6 +39,8 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
   const unchanged = activities.filter(a => a.type !== 'fixed' && a.status !== 'upcoming');
   const movable   = activities
     .filter(a => a.status === 'upcoming' && a.type === 'flexible')
+    // Guard: only include activities with valid start/end time strings
+    .filter(a => !isNaN(toMinutes(a.start)) && !isNaN(toMinutes(a.end)))
     .map(a => ({ ...a })); // shallow clone so we don't mutate callers' objects
 
   // ── 2. Energy-based duration adjustment ───────────────────────────────────
@@ -84,7 +90,7 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
 
   // ── 4. Build schedule ─────────────────────────────────────────────────────
   const upcomingFixed = fixed
-    .filter(a => toMinutes(a.end) > currentTimeMinutes)
+    .filter(a => !isNaN(toMinutes(a.start)) && !isNaN(toMinutes(a.end)) && toMinutes(a.end) > currentTimeMinutes)
     .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
 
   const lowEnergyCap = currentTimeMinutes + 360; // 6 hours
@@ -98,12 +104,13 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
     const activity = movable[i];
     const adjustedDuration = activity._adjustedDuration;
 
-    // ── Low-energy rest break insertion ────────────────────────────────────
+    // ── Low-energy rest break insertion (pre-check) ────────────────────────
+    // If we've already accumulated >=60 work-minutes before this activity,
+    // insert a rest break first (pre-existing surplus from last activity).
     if (energy <= 2 && workSinceLastRest >= 60 && activity.category !== 'Break') {
       const restStart = cursor;
       const restEnd   = cursor + 15;
 
-      // Only insert if it fits within cap and midnight
       if (restEnd <= 1440 && restEnd <= lowEnergyCap) {
         const restBreak = {
           title:    'Rest break',
@@ -116,8 +123,6 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
           end:      toTime(restEnd),
           duration: '15 min',
           _id:      `rest-${Date.now()}-${Math.random()}`,
-          _adjustedDuration: 15,
-          _originalDuration: 15,
         };
         scheduled.push(restBreak);
         adjustments.push(`Added rest break at ${toTime(restStart)}`);
@@ -156,7 +161,8 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
 
     // ── Cap checks ─────────────────────────────────────────────────────────
     if (end > 1440 || (energy <= 2 && start > lowEnergyCap)) {
-      const skipped = { ...activity, status: 'skipped' };
+      // Use sentinel start '23:59' so skipped activities sort to the tail
+      const skipped = { ...activity, status: 'skipped', start: '23:59', end: '23:59' };
       delete skipped._adjustedDuration;
       delete skipped._originalDuration;
       scheduled.push(skipped);
@@ -181,7 +187,34 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
 
     // Track work time for low-energy rest insertion
     if (activity.category !== 'Break') {
-      workSinceLastRest += (end - start);
+      const workAdded = end - start;
+      workSinceLastRest += workAdded;
+
+      // Post-placement check: if a single activity crossed the 60-min boundary,
+      // insert a rest break immediately after it (retroactively into scheduled).
+      // This handles the case where one long task > 60 min runs without a break.
+      if (energy <= 2 && workSinceLastRest >= 60) {
+        const restStart = cursor;
+        const restEnd   = cursor + 15;
+        if (restEnd <= 1440 && restEnd <= lowEnergyCap) {
+          const restBreak = {
+            title:    'Rest break',
+            category: 'Break',
+            type:     'flexible',
+            status:   'upcoming',
+            energy:   energy,
+            date:     activity.date,
+            start:    toTime(restStart),
+            end:      toTime(restEnd),
+            duration: '15 min',
+            _id:      `rest-${Date.now()}-${Math.random()}`,
+          };
+          scheduled.push(restBreak);
+          adjustments.push(`Added rest break at ${toTime(restStart)}`);
+          cursor = restEnd;
+          workSinceLastRest = 0;
+        }
+      }
     } else {
       workSinceLastRest = 0;
     }
@@ -246,9 +279,13 @@ module.exports = function replanEngine(activities, energy, currentTimeMinutes) {
   const result = [...fixedClean, ...unchangedClean, ...allScheduled];
 
   // Sort by start time (HH:MM string comparison works fine here)
+  // NaN-safe: activities with malformed start times sort to the end
   result.sort((a, b) => {
     const aMin = toMinutes(a.start);
     const bMin = toMinutes(b.start);
+    if (isNaN(aMin) && isNaN(bMin)) return 0;
+    if (isNaN(aMin)) return 1;
+    if (isNaN(bMin)) return -1;
     return aMin - bMin;
   });
 

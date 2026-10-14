@@ -90,10 +90,11 @@ app.post('/api/replan', async (req, res) => {
     const { activities: rescheduled, insights } = result;
 
     // Save time changes for existing DB activities (those with real _id)
+    // Include `date` in the filter to prevent cross-date or cross-user overwrites
     const updatePromises = rescheduled
       .filter(a => a._id && !String(a._id).startsWith('rest-'))
-      .map(a => Activity.findByIdAndUpdate(
-        a._id,
+      .map(a => Activity.findOneAndUpdate(
+        { _id: a._id, date },
         { $set: { start: a.start, end: a.end, duration: a.duration, status: a.status } },
         { new: true, runValidators: true }
       ));
